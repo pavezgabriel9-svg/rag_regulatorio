@@ -1,0 +1,28 @@
+# Credenciales y configuración local
+.env
+
+# Entorno virtual Python
+venv/
+.venv/
+env/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Base de datos vectorial (generada por ingestión)
+db_chroma/
+
+# Archivos PDF subidos por el usuario
+archivos/
+
+# macOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs
+*.log
