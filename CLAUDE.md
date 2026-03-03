@@ -5,11 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running the Application
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (--prefer-binary avoids C++ compilation of chroma-hnswlib)
+pip install --prefer-binary -r requirements.txt
 
-# Start the Streamlit app
-streamlit run rag_regulatorio/app.py
+# Start the Streamlit app (app.py is at the project root, not in a subdirectory)
+streamlit run app.py
 
 # Or using the Windows script
 iniciar.bat
@@ -17,9 +17,11 @@ iniciar.bat
 
 The app runs at `http://localhost:8501` by default. There is no test suite.
 
+> **Python 3.13 note**: `chroma-hnswlib` requires compilation if no pre-built wheel exists for the running Python version. `iniciar.bat` uses `--prefer-binary` to prefer wheels. If it still fails, install [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload, or use Python 3.11/3.12.
+
 ## Environment Setup
 
-Copy `rag_regulatorio/.env.example` to `rag_regulatorio/.env` and fill in:
+Copy `.env.example` to `.env` (both at the project root) and fill in:
 
 ```env
 OPENAI_API_KEY=sk-...          # Required
@@ -53,19 +55,19 @@ Query routing is handled by `motor/router.py`: specific FL/CAS/article numbers a
 | `ingesta/chunker.py` | Converts rows/chunks to `{id, texto, metadata}` dicts for indexing |
 | `ingesta/ingest.py` | Orchestrates ChromaDB + MySQL writes; manages embeddings in batches of 50 |
 | `motor/router.py` | Classifies query as `'semantico'` or `'analitico'` |
-| `motor/retriever.py` | Vector search + re-ranking (top_k=8 → 3–6 final chunks) |
+| `motor/retriever.py` | Vector search + re-ranking (top_k=12 → 3–6 final chunks) |
 | `motor/generator.py` | GPT-4o response generation for both semantic and analytical results |
-| `motor/sql_manager.py` | MySQL connection, schema creation, CRUD, parameterized queries |
+| `motor/sql_manager.py` | MySQL connection, database + schema auto-creation, CRUD, parameterized queries |
 | `motor/sql_executor.py` | 8 regex templates → GPT fallback for SQL generation; validates SELECT-only |
 | `app.py` | Streamlit UI: Chat tab + Administration tab |
 
 ### Key Design Decisions
 
-**Dynamic column mapping**: Users define semantic categories (nombre/identificador/restriccion/pureza/nota/ignorar) per document. No column names are hardcoded. Mappings persist in ChromaDB chunk metadata.
+**Dynamic column mapping**: Users define semantic categories (nombre/identificador/datos/ignorar) per document. No column names are hardcoded. `datos` columns preserve their original name as a label ("ColName: value | ColName2: value2"), making the system generic across different document types. Mappings persist in ChromaDB chunk metadata.
 
-**Chunking**: Articles split at ~400 words with 50-word overlap. Table rows converted to natural Spanish via `chunker.fila_a_texto()`.
+**Chunking**: Text pages and articles split at ~200 words with 40-word overlap (applied to both article and non-article pages). Table rows converted to natural Spanish via `chunker.fila_a_texto()`.
 
-**Retrieval scoring**: ChromaDB cosine distance converted to similarity (`1 - distance/2`). Scores boosted by +0.15 for legal-term matches, +0.20 for FL/CAS identifier hits. Score < 0.65 shows a "low relevance" badge in the UI.
+**Retrieval scoring**: ChromaDB cosine distance converted to similarity (`1 - distance/2`). Scores boosted by +0.15 for legal-term matches (bilingual: Spanish + English), +0.20 for FL/CAS identifier hits. Score < 0.65 shows a "low relevance" badge in the UI. `top_k=12` candidates retrieved before re-ranking to 3–6 final chunks.
 
 **SQL safety**: `sql_executor._validar_sql()` whitelists SELECT only — no DDL or DML allowed through the GPT-generated path.
 
@@ -75,10 +77,10 @@ Query routing is handled by `motor/router.py`: specific FL/CAS/article numbers a
 ```sql
 documentos(id, nombre, tipo, total_sustancias, fecha_ingesta)
 sustancias(id, documento_id, nombre, identificador, numero_fl, numero_cas,
-           restriccion, pureza, nota, pagina, raw_json)
+           datos, pagina, raw_json)
 ```
 
-All substances across all PDFs share a single `sustancias` table, linked to their source via `documento_id` FK. Indexes: `idx_documento`, `idx_nombre`, `idx_doc_nombre` (composite — for filtered name searches across multi-document scenarios), `idx_fl`, `idx_cas`, `idx_pagina`. The composite index `idx_doc_nombre (documento_id, nombre(100))` was added to optimize queries scoped to a specific document.
+`datos` replaces the former `restriccion/pureza/nota` columns. It stores all non-name/non-identifier columns as a single text field with format `"ColName: value | ColName2: value2"`, making the schema generic across document types. `numero_fl` and `numero_cas` are extracted from `identificador` via regex for indexed lookup. `raw_json` preserves the full original row. All rows share a single `sustancias` table linked via `documento_id` FK.
 
 ### Data Flow (PDF Ingestion)
 

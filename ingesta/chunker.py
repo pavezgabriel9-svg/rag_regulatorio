@@ -1,54 +1,45 @@
 """
 chunker.py — Conversión de filas de tabla a texto natural para embeddings.
 
-La función fila_a_texto() es dinámica: usa las categorías semánticas del mapeo
-definido por el usuario, no nombres de columnas hardcodeados.
+La función fila_a_texto() usa las categorías semánticas del mapeo definido por
+el usuario: nombre, identificador, datos. Los campos vacíos se omiten para
+producir texto limpio independientemente del tipo de documento.
 """
 
 from loguru import logger
-
-
-# Textos de reemplazo cuando un campo está vacío
-_VACIOS = {
-    "nombre":       "Sin denominación registrada.",
-    "identificador": "Sin identificador registrado.",
-    "restriccion":  "Sin restricciones específicas de uso.",
-    "pureza":       "No especificada.",
-    "nota":         "Sin nota regulatoria adicional.",
-}
-
-# Etiquetas en español para cada categoría semántica
-_ETIQUETAS = {
-    "nombre":        "Sustancia",
-    "identificador": "Identificador",
-    "restriccion":   "Restricciones de uso",
-    "pureza":        "Pureza mínima requerida",
-    "nota":          "Nota regulatoria",
-}
 
 
 def fila_a_texto(fila: dict) -> str:
     """
     Convierte una fila procesada (con claves semánticas) a texto natural en español.
 
-    La fila debe tener las claves: nombre, identificador, restriccion, pureza, nota.
+    La fila debe tener las claves: nombre, identificador, datos.
     (producidas por extractor._aplicar_mapeo)
 
-    Ejemplo de salida:
+    Los campos vacíos se omiten. El campo 'datos' ya contiene los nombres de
+    columna originales como etiquetas: "Col1: val1 | Col2: val2".
+
+    Ejemplo de salida (documento UE):
         Sustancia: Limoneno.
         Identificador: CAS 138-86-3 | FL 491.
-        Restricciones de uso: Sin restricciones específicas de uso.
-        Pureza mínima requerida: 95%.
-        Nota regulatoria: Sin nota regulatoria adicional.
+        Datos: Restricciones de uso: Solo cat. IV | Pureza: ≥ 95%.
+
+    Ejemplo de salida (documento Japón):
+        Sustancia: 酢酸.
+        Datos: 規制値: 0.1mg | 用途: 食品添加物.
     """
     lineas = []
 
-    for categoria in ["nombre", "identificador", "restriccion", "pureza", "nota"]:
-        valor = fila.get(categoria, "").strip()
-        if not valor:
-            valor = _VACIOS[categoria]
-        etiqueta = _ETIQUETAS[categoria]
-        lineas.append(f"{etiqueta}: {valor}.")
+    nombre = fila.get("nombre", "").strip() or "Sin denominación registrada."
+    lineas.append(f"Sustancia: {nombre}.")
+
+    identificador = fila.get("identificador", "").strip()
+    if identificador:
+        lineas.append(f"Identificador: {identificador}.")
+
+    datos = fila.get("datos", "").strip()
+    if datos:
+        lineas.append(f"Datos: {datos}.")
 
     return "\n".join(lineas)
 
@@ -67,7 +58,9 @@ def chunks_texto_a_documentos(
     """
     documentos = []
     for i, chunk in enumerate(chunks):
-        doc_id = f"{nombre_archivo}_articulo_{chunk.get('numero_articulo', i)}_{chunk.get('sub_chunk', '1/1').replace('/', '_')}"
+        numero = chunk.get('numero_articulo') or f"p{chunk.get('pagina', i)}"
+        sub = chunk.get('sub_chunk', '1/1').replace('/', '_')
+        doc_id = f"{nombre_archivo}_articulo_{numero}_{sub}_{i}"
         documentos.append({
             "id": doc_id,
             "texto": chunk["texto"],

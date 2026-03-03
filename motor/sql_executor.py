@@ -49,32 +49,22 @@ TEMPLATES = [
         "patrones": [r'listar?\s+todas?', r'dame\s+todas?', r'mostrar\s+todas?', r'lista\s+de\s+sustancias?', r'todas?\s+las?\s+sustancias?'],
         "builder": lambda m, doc: _tpl_listar_todas(doc),
     },
-    # 3. Sustancias con restricciones
-    {
-        "patrones": [r'con\s+restricciones?', r'tienen?\s+restricciones?', r'sustancias?\s+restringidas?'],
-        "builder": lambda m, doc: _tpl_con_restricciones(doc),
-    },
-    # 4. Sustancias sin pureza
-    {
-        "patrones": [r'sin\s+pureza', r'pureza\s+(no\s+)?definida', r'sin\s+pureza\s+especificada?'],
-        "builder": lambda m, doc: _tpl_sin_pureza(doc),
-    },
-    # 5. Buscar por nombre
+    # 3. Buscar por nombre
     {
         "patrones": [r'buscar?\s+(["\w\s]+)', r'encontrar?\s+(["\w\s]+)', r'existe\s+(["\w\s]+)'],
         "builder": lambda m, doc: _tpl_buscar_nombre(m, doc),
     },
-    # 6. Buscar por FL
+    # 4. Buscar por FL
     {
         "patrones": [r'FL[\s\-]?(\d+)', r'número\s+FL\s+(\d+)'],
         "builder": lambda m, doc: _tpl_buscar_fl(m, doc),
     },
-    # 7. Buscar por CAS
+    # 5. Buscar por CAS
     {
         "patrones": [r'CAS[\s\-]?(\d[\d\-]+)', r'número\s+CAS\s+([\d\-]+)'],
         "builder": lambda m, doc: _tpl_buscar_cas(m, doc),
     },
-    # 8. Documentos cargados
+    # 6. Documentos cargados
     {
         "patrones": [r'documentos?\s+cargados?', r'qu[eé]\s+documentos?\s+hay', r'archivos?\s+indexados?'],
         "builder": lambda m, doc: _tpl_documentos(),
@@ -89,25 +79,7 @@ def _tpl_contar_sustancias(doc):
 
 def _tpl_listar_todas(doc):
     join, params = _where_doc(doc)
-    sql = f"SELECT s.nombre, s.identificador, s.restriccion, s.pagina FROM sustancias s {join} ORDER BY s.nombre LIMIT 200"
-    return sql.strip(), params
-
-def _tpl_con_restricciones(doc):
-    join, params = _where_doc(doc)
-    if join:
-        where = join + " AND (s.restriccion IS NOT NULL AND s.restriccion != '')"
-    else:
-        where = "WHERE s.restriccion IS NOT NULL AND s.restriccion != ''"
-    sql = f"SELECT s.nombre, s.identificador, s.restriccion FROM sustancias s {where} ORDER BY s.nombre"
-    return sql.strip(), params
-
-def _tpl_sin_pureza(doc):
-    join, params = _where_doc(doc)
-    if join:
-        where = join + " AND (s.pureza IS NULL OR s.pureza = '')"
-    else:
-        where = "WHERE s.pureza IS NULL OR s.pureza = ''"
-    sql = f"SELECT s.nombre, s.identificador FROM sustancias s {where} ORDER BY s.nombre"
+    sql = f"SELECT s.nombre, s.identificador, s.datos, s.pagina FROM sustancias s {join} ORDER BY s.nombre LIMIT 200"
     return sql.strip(), params
 
 def _tpl_buscar_nombre(match, doc):
@@ -117,7 +89,7 @@ def _tpl_buscar_nombre(match, doc):
         where = join + " AND s.nombre LIKE %s"
     else:
         where = "WHERE s.nombre LIKE %s"
-    sql = f"SELECT s.nombre, s.identificador, s.restriccion, s.pureza, s.pagina FROM sustancias s {where}"
+    sql = f"SELECT s.nombre, s.identificador, s.datos, s.pagina FROM sustancias s {where}"
     return sql.strip(), params + (f"%{termino}%",)
 
 def _tpl_buscar_fl(match, doc):
@@ -127,7 +99,7 @@ def _tpl_buscar_fl(match, doc):
         where = join + " AND s.numero_fl = %s"
     else:
         where = "WHERE s.numero_fl = %s"
-    sql = f"SELECT s.nombre, s.identificador, s.restriccion, s.pureza, s.nota, s.pagina FROM sustancias s {where}"
+    sql = f"SELECT s.nombre, s.identificador, s.datos, s.pagina FROM sustancias s {where}"
     return sql.strip(), params + (numero,)
 
 def _tpl_buscar_cas(match, doc):
@@ -137,7 +109,7 @@ def _tpl_buscar_cas(match, doc):
         where = join + " AND s.numero_cas = %s"
     else:
         where = "WHERE s.numero_cas = %s"
-    sql = f"SELECT s.nombre, s.identificador, s.restriccion, s.pureza, s.nota, s.pagina FROM sustancias s {where}"
+    sql = f"SELECT s.nombre, s.identificador, s.datos, s.pagina FROM sustancias s {where}"
     return sql.strip(), params + (numero,)
 
 def _tpl_documentos():

@@ -130,6 +130,7 @@ def analizar_estructura_pdf(pdf_path: str) -> dict:
         "paginas_texto": n_texto,
         "paginas_tabla": n_tabla,
         "inicio_tabla": primera_pagina_tabla,
+        "paginas_con_tabla": paginas_con_tabla,
         "columnas_detectadas": columnas_detectadas,
         "preview_filas": preview_filas,
         "confianza": round(confianza, 2),
@@ -149,16 +150,16 @@ def analizar_estructura_pdf(pdf_path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 REGEX_ARTICULO = re.compile(r'^Art[íi]culo\s+\d+', re.IGNORECASE | re.MULTILINE)
-MAX_TOKENS_CHUNK = 400  # límite aproximado en palabras (no tokens reales)
-OVERLAP_PALABRAS = 90
+MAX_TOKENS_CHUNK = 200  # límite aproximado en palabras (no tokens reales)
+OVERLAP_PALABRAS = 40
 
 
 def _palabras(texto: str) -> int:
     return len(texto.split())
 
 
-def _split_con_overlap(texto: str, numero_articulo: str, pagina: int) -> list[dict]:
-    """Divide un artículo largo en sub-chunks con overlap."""
+def _split_con_overlap(texto: str, numero_articulo: str, pagina: int, tipo: str = "articulo") -> list[dict]:
+    """Divide un texto largo en sub-chunks con overlap."""
     palabras = texto.split()
     chunks = []
     inicio = 0
@@ -170,7 +171,7 @@ def _split_con_overlap(texto: str, numero_articulo: str, pagina: int) -> list[di
         total_partes = max(2, (len(palabras) + MAX_TOKENS_CHUNK - 1) // MAX_TOKENS_CHUNK)
         chunks.append({
             "texto": fragmento,
-            "tipo": "articulo",
+            "tipo": tipo,
             "numero_articulo": numero_articulo,
             "sub_chunk": f"{parte}/{total_partes}",
             "pagina": pagina,
@@ -183,14 +184,23 @@ def _split_con_overlap(texto: str, numero_articulo: str, pagina: int) -> list[di
     return chunks
 
 
-def extraer_texto_narrativo(pdf_path: str, pagina_fin_texto: int = None) -> list[dict]:
+def extraer_texto_narrativo(
+    pdf_path: str,
+    pagina_fin_texto: int = None,
+    paginas_a_excluir: set = None,
+) -> list[dict]:
     """
     Extrae texto narrativo (artículos, considerandos, párrafos) del PDF.
 
     Args:
-        pdf_path:         ruta al PDF
-        pagina_fin_texto: última página de texto narrativo (si se conoce la estructura)
-                          Si es None, procesa todas las páginas sin tabla.
+        pdf_path:           ruta al PDF
+        pagina_fin_texto:   (legacy) última página a procesar. Si se proporciona
+                            paginas_a_excluir, este parámetro se ignora.
+        paginas_a_excluir:  conjunto de números de página (1-indexed) a omitir
+                            durante la extracción de texto. Úsalo para excluir
+                            páginas que ya están cubiertas por extracción de tablas.
+                            Si es None, se procesan todas las páginas (o hasta
+                            pagina_fin_texto si se especificó).
 
     Retorna lista de dicts:
         {texto, tipo, numero_articulo, sub_chunk, pagina}
@@ -203,11 +213,16 @@ def extraer_texto_narrativo(pdf_path: str, pagina_fin_texto: int = None) -> list
     chunks_pagina = []  # páginas sin artículos detectados → chunk por página
 
     with pdfplumber.open(pdf_path) as pdf:
-        paginas_a_procesar = pdf.pages
-        if pagina_fin_texto is not None:
+        if paginas_a_excluir is not None:
+            paginas_a_procesar = pdf.pages
+        elif pagina_fin_texto is not None:
             paginas_a_procesar = pdf.pages[:pagina_fin_texto]
+        else:
+            paginas_a_procesar = pdf.pages
 
         for page in paginas_a_procesar:
+            if paginas_a_excluir and page.page_number in paginas_a_excluir:
+                continue
             texto_pagina = page.extract_text() or ""
             lineas = texto_pagina.splitlines()
             pagina_num = page.page_number
@@ -232,13 +247,18 @@ def extraer_texto_narrativo(pdf_path: str, pagina_fin_texto: int = None) -> list
             if not articulo_actual and texto_sin_articulo:
                 texto_completo = "\n".join(texto_sin_articulo).strip()
                 if texto_completo:
-                    chunks_pagina.append({
-                        "texto": texto_completo,
-                        "tipo": "texto",
-                        "numero_articulo": "",
-                        "sub_chunk": "1/1",
-                        "pagina": pagina_num,
-                    })
+                    if _palabras(texto_completo) <= MAX_TOKENS_CHUNK:
+                        chunks_pagina.append({
+                            "texto": texto_completo,
+                            "tipo": "texto",
+                            "numero_articulo": "",
+                            "sub_chunk": "1/1",
+                            "pagina": pagina_num,
+                        })
+                    else:
+                        chunks_pagina.extend(
+                            _split_con_overlap(texto_completo, "", pagina_num, tipo="texto")
+                        )
 
     # Convertir artículos a chunks (con split si son largos)
     resultado = []
@@ -280,9 +300,8 @@ def extraer_tabla_sustancias(
         pdf_path:       ruta al PDF
         pagina_inicio:  primera página de la tabla (1-indexed)
         mapeo_columnas: {nombre_columna_original: categoria_semantica}
-                        Ej: {"Substance name": "nombre", "ADI": "restriccion"}
-                        Categorías: "nombre" | "identificador" | "restriccion" |
-                                    "pureza" | "nota" | "ignorar"
+                        Ej: {"Substance name": "nombre", "ADI": "datos"}
+                        Categorías: "nombre" | "identificador" | "datos" | "ignorar"
 
     Retorna lista de dicts con claves normalizadas + raw.
     """
@@ -358,10 +377,18 @@ def _limpiar_celda(valor) -> str:
 def _aplicar_mapeo(raw: dict, mapeo: dict[str, str]) -> dict:
     """
     Convierte un dict de columnas originales a categorías semánticas.
-    Si hay múltiples columnas mapeadas a la misma categoría, se concatenan.
+
+    Categorías:
+      - nombre:       nombre principal de la entidad (requerido)
+      - identificador: códigos CAS, FL u otros identificadores
+      - datos:        resto de columnas relevantes; se preservan como
+                      "NombreColumna: valor | NombreColumna2: valor2"
+      - ignorar:      se descarta
+
+    Si hay múltiples columnas en nombre/identificador, se concatenan con " | ".
     """
-    CATEGORIAS = ["nombre", "identificador", "restriccion", "pureza", "nota"]
-    resultado = {cat: "" for cat in CATEGORIAS}
+    resultado = {"nombre": "", "identificador": "", "datos": ""}
+    datos_pares = []
 
     for col_original, categoria in mapeo.items():
         if categoria == "ignorar":
@@ -369,10 +396,13 @@ def _aplicar_mapeo(raw: dict, mapeo: dict[str, str]) -> dict:
         valor = raw.get(col_original, "")
         if not valor:
             continue
-        if categoria in resultado:
+        if categoria == "datos":
+            datos_pares.append(f"{col_original}: {valor}")
+        elif categoria in resultado:
             if resultado[categoria]:
                 resultado[categoria] += " | " + valor
             else:
                 resultado[categoria] = valor
 
+    resultado["datos"] = " | ".join(datos_pares)
     return resultado

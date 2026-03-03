@@ -37,19 +37,17 @@ CREATE TABLE IF NOT EXISTS sustancias (
     identificador  VARCHAR(255),
     numero_fl      VARCHAR(50),
     numero_cas     VARCHAR(100),
-    restriccion    TEXT,
-    pureza         VARCHAR(255),
-    nota           TEXT,
+    datos          TEXT,
     pagina         SMALLINT UNSIGNED,
     raw_json       JSON,
     FOREIGN KEY (documento_id)
         REFERENCES documentos(id) ON DELETE CASCADE,
-    INDEX idx_documento      (documento_id),
-    INDEX idx_nombre         (nombre(100)),
-    INDEX idx_doc_nombre     (documento_id, nombre(100)),
-    INDEX idx_fl             (numero_fl),
-    INDEX idx_cas            (numero_cas),
-    INDEX idx_pagina         (pagina)
+    INDEX idx_documento  (documento_id),
+    INDEX idx_nombre     (nombre(100)),
+    INDEX idx_doc_nombre (documento_id, nombre(100)),
+    INDEX idx_fl         (numero_fl),
+    INDEX idx_cas        (numero_cas),
+    INDEX idx_pagina     (pagina)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
@@ -88,9 +86,25 @@ def _conectar() -> pymysql.Connection | None:
 
 def init_db() -> bool:
     """
-    Crea las tablas si no existen.
+    Crea la base de datos y las tablas si no existen.
     Retorna True si OK, False si MySQL no disponible.
     """
+    config = _get_config()
+    if config is None:
+        return False
+    # Conectar sin especificar base de datos para poder crearla
+    config_sin_db = {k: v for k, v in config.items() if k != "database"}
+    database = config["database"]
+    try:
+        conn_init = pymysql.connect(**config_sin_db)
+        with conn_init.cursor() as cur:
+            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+        conn_init.close()
+        logger.info(f"MySQL — base de datos '{database}' verificada/creada")
+    except Exception as e:
+        logger.error(f"MySQL — no se pudo crear la base de datos: {e}")
+        return False
+
     conn = _conectar()
     if conn is None:
         return False
@@ -184,9 +198,7 @@ def insertar_sustancias(documento_id: int, filas: list[dict]) -> int:
             identificador[:255],
             _extraer_fl(identificador),
             _extraer_cas(identificador),
-            fila.get("restriccion") or None,
-            (fila.get("pureza") or None),
-            fila.get("nota") or None,
+            fila.get("datos") or None,
             fila.get("pagina") or None,
             json.dumps(raw, ensure_ascii=False) if raw else None,
         ))
@@ -197,8 +209,8 @@ def insertar_sustancias(documento_id: int, filas: list[dict]) -> int:
                 """
                 INSERT INTO sustancias
                     (documento_id, nombre, identificador, numero_fl, numero_cas,
-                     restriccion, pureza, nota, pagina, raw_json)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     datos, pagina, raw_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 registros,
             )
@@ -291,14 +303,12 @@ documentos(id, nombre, tipo, total_sustancias, fecha_ingesta)
   - total_sustancias: cantidad de sustancias indexadas
 
 sustancias(id, documento_id, nombre, identificador, numero_fl, numero_cas,
-           restriccion, pureza, nota, pagina, raw_json)
-  - nombre: nombre de la sustancia
-  - identificador: texto completo (ej. "CAS 138-86-3 | FL 491")
+           datos, pagina, raw_json)
+  - nombre: nombre de la sustancia o entidad principal
+  - identificador: texto completo de códigos (ej. "CAS 138-86-3 | FL 491")
   - numero_fl: número FL extraído (ej. "491")
   - numero_cas: número CAS extraído (ej. "138-86-3")
-  - restriccion: restricciones de uso (puede ser NULL o vacío)
-  - pureza: pureza mínima requerida (puede ser NULL o vacío)
-  - nota: nota regulatoria adicional
+  - datos: resto de columnas relevantes en formato "Columna: valor | Columna2: valor2"
   - pagina: número de página en el PDF
 
 Relación: sustancias.documento_id → documentos.id

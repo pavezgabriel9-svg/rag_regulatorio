@@ -45,6 +45,8 @@ if "documento_filtro" not in st.session_state:
     st.session_state.documento_filtro = "Todos los documentos"
 if "confirmar_baja" not in st.session_state:
     st.session_state.confirmar_baja = {}
+if "upload_key" not in st.session_state:
+    st.session_state.upload_key = 0
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +287,7 @@ def _seccion_documentos_indexados():
 def _seccion_agregar_documento():
     st.subheader("Agregar nuevo documento")
 
-    archivo = st.file_uploader("Selecciona un PDF", type=["pdf"])
+    archivo = st.file_uploader("Selecciona un PDF", type=["pdf"], key=f"uploader_{st.session_state.upload_key}")
     if not archivo:
         return
 
@@ -326,6 +328,22 @@ def _seccion_agregar_documento():
     else:
         st.success(f"Estructura detectada: **{tipo}** · confianza {confianza:.0%}", icon="✅")
 
+    # Opción de indexar como texto plano para documentos con tablas complejas
+    forzar_solo_texto = False
+    if tipo == "mixto":
+        forzar_solo_texto = st.checkbox(
+            "📄 Indexar todo como texto (sin extraer tabla estructurada)",
+            value=False,
+            help=(
+                "Útil para documentos con múltiples tablas intercaladas, tablas de medición "
+                "que no son listas de sustancias, o documentos tipo monografía donde cada "
+                "sustancia ocupa varias páginas. El sistema extraerá el texto de todas las "
+                "páginas y lo hará buscable semánticamente."
+            ),
+        )
+        if forzar_solo_texto:
+            tipo = "solo_texto"
+
     # Ajuste manual del inicio de tabla
     inicio_tabla_ajustado = analisis.get("inicio_tabla")
     if tipo in ("mixto", "solo_tabla") and inicio_tabla_ajustado is not None:
@@ -350,30 +368,29 @@ def _seccion_agregar_documento():
                 use_container_width=True,
             )
 
-        CATEGORIAS = [
-            "nombre",
-            "identificador",
-            "restriccion",
-            "pureza",
-            "nota",
-            "ignorar",
-        ]
         CATEGORIAS_LABELS = {
-            "nombre": "Nombre principal",
-            "identificador": "Identificador (CAS, FL, código...)",
-            "restriccion": "Restricción de uso",
-            "pureza": "Pureza mínima",
-            "nota": "Nota regulatoria",
-            "ignorar": "Otro (ignorar)",
+            "nombre": "Nombre principal (obligatorio — al menos 1)",
+            "identificador": "Identificador (CAS, FL u otro código)",
+            "datos": "Incluir como datos",
+            "ignorar": "Ignorar",
         }
 
         st.markdown("**Etiqueta cada columna detectada:**")
-        for col in analisis["columnas_detectadas"]:
+        st.caption(
+            "Asigna **Nombre principal** a la columna con el nombre de la entidad. "
+            "**Identificador** para códigos CAS, FL, etc. "
+            "**Incluir como datos** para el resto de columnas relevantes. "
+            "**Ignorar** para columnas sin información útil (numeración, etc.)."
+        )
+        for i, col in enumerate(analisis["columnas_detectadas"]):
             key = f"mapeo_{nombre_archivo}_{col}"
+            # Primera columna: default "nombre"; resto: default "datos"
+            default_idx = 0 if i == 0 else 2
             opcion = st.selectbox(
                 f'Columna: **"{col}"**',
                 options=list(CATEGORIAS_LABELS.keys()),
                 format_func=lambda x: CATEGORIAS_LABELS[x],
+                index=default_idx,
                 key=key,
             )
             mapeo_columnas[col] = opcion
@@ -417,8 +434,15 @@ def _procesar_e_indexar(
         # Paso 1: Extraer texto narrativo
         if tipo in ("solo_texto", "mixto"):
             progress.progress(10, text="📄 Extrayendo texto narrativo...")
-            pagina_fin = (inicio_tabla - 1) if inicio_tabla and tipo == "mixto" else None
-            chunks_texto = extraer_texto_narrativo(ruta_pdf, pagina_fin_texto=pagina_fin)
+            if tipo == "solo_texto":
+                # Modo texto puro: procesar TODAS las páginas sin exclusiones.
+                # Cubre documentos tipo monografía (múltiples tablas intercaladas)
+                # donde las "tablas" no son listas de sustancias sino especificaciones.
+                chunks_texto = extraer_texto_narrativo(ruta_pdf)
+            else:
+                # Modo mixto: excluir páginas con tabla para no duplicar su contenido.
+                paginas_tabla = set(analisis.get("paginas_con_tabla", []))
+                chunks_texto = extraer_texto_narrativo(ruta_pdf, paginas_a_excluir=paginas_tabla or None)
             todos_los_docs.extend(chunks_texto_a_documentos(chunks_texto, nombre_archivo))
 
         # Paso 2: Extraer tabla
@@ -448,11 +472,10 @@ def _procesar_e_indexar(
 
         st.success(f"✅ Listo. Se indexaron **{total_chunks}** fragmentos de {nombre_archivo}.")
 
-        # Limpiar estado del análisis para el próximo archivo
-        if "analisis_pdf" in st.session_state:
-            del st.session_state.analisis_pdf
-        if "analisis_nombre" in st.session_state:
-            del st.session_state.analisis_nombre
+        # Resetear el file_uploader y limpiar análisis para el próximo archivo
+        st.session_state.upload_key += 1
+        for key in ("analisis_pdf", "analisis_nombre"):
+            st.session_state.pop(key, None)
 
         st.rerun()
 

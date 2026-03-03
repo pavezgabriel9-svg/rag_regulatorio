@@ -21,7 +21,7 @@ load_dotenv()
 COLECCION = "reglamento_regulatorio"
 DB_PATH = str(__import__('pathlib').Path(__file__).resolve().parent.parent / "db_chroma")
 
-TOP_K_RECUPERAR = 8
+TOP_K_RECUPERAR = 12
 MIN_CHUNKS_MODELO = 3
 MAX_CHUNKS_MODELO = 6
 SCORE_ALTO = 0.75
@@ -29,9 +29,16 @@ SCORE_MEDIO = 0.55
 SCORE_BAJO_LABEL = 0.65   # umbral para badge "relevancia baja" en UI
 
 PALABRAS_LEGALES = [
-    "artículo", "reglamento", "disposición", "establece",
-    "prohíbe", "permite", "norma", "considerando", "anexo",
-    "apartado", "párrafo", "inciso",
+    #Spanish regulatory terms
+    "especificación", "estándar", "reglamento", "requisito",
+    "permitido", "prohibido", "restringido", "anexo", "sección",
+    "artículo", "párrafo", "provisión", "cláusula", "límite",
+    "pureza", "identificación", "descripción", "prueba", "ensayo",
+    # English regulatory terms
+    "specification", "standard", "regulation", "requirement",
+    "permitted", "prohibited", "restricted", "annex", "section",
+    "article", "paragraph", "provision", "clause", "limit",
+    "purity", "identification", "description", "test", "assay",
 ]
 
 

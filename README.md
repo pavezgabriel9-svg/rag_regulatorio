@@ -4,7 +4,7 @@ Esta herramienta te permite **hacer preguntas en lenguaje natural** sobre docume
 
 No necesitas saber programación ni bases de datos para usarla.
 
-Skills utilziados
+Skills utilizados
 - Brainstorming
 - sql-optimizaion-patterns
 
@@ -29,6 +29,8 @@ Necesitas tener instalado en tu computador:
 - **Python 3.11 o superior** — el lenguaje en que está hecho el programa
   Descárgalo desde: [python.org/downloads](https://www.python.org/downloads/)
   Durante la instalación, marca la opción **"Add Python to PATH"**
+
+  > Si usas Python 3.13, el instalador intentará compilar `chroma-hnswlib` desde fuente. Si aparece el error *"Microsoft Visual C++ 14.0 or greater is required"*, instala [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) marcando la opción **"Desarrollo de escritorio con C++"**. Con Python 3.11 o 3.12 este paso no es necesario.
 
 - **Una API Key de OpenAI** — el servicio de inteligencia artificial que procesa las preguntas
   Cómo obtenerla: entra a [platform.openai.com](https://platform.openai.com), crea una cuenta, ve a *API Keys* y genera una nueva. Tiene costo por uso (muy bajo para este volumen).
@@ -60,7 +62,7 @@ Necesitas tener instalado en tu computador:
 
 **En Windows:** haz doble clic en el archivo `iniciar.bat`
 
-La primera vez instalará las dependencias automáticamente (puede tardar unos minutos). Luego se abrirá el navegador con la aplicación en `http://localhost:8501`.
+La primera vez instalará las dependencias automáticamente (puede tardar unos minutos). Si la instalación falla, el script mostrará un mensaje de error con instrucciones. Luego se abrirá el navegador con la aplicación en `http://localhost:8501`.
 
 **En Mac/Linux:** abre una terminal en la carpeta `rag_regulatorio` y ejecuta:
 ```bash
@@ -91,12 +93,10 @@ Aquí cargas los PDFs que quieres consultar.
 
    | Categoría | ¿Qué va ahí? |
    |-----------|-------------|
-   | **nombre** | El nombre de la sustancia |
-   | **identificador** | Números FL, CAS u otros códigos |
-   | **restriccion** | Límites o condiciones de uso |
-   | **pureza** | Porcentaje mínimo de pureza |
-   | **nota** | Observaciones adicionales |
-   | **ignorar** | Columnas sin información relevante (ej. numeración) |
+   | **nombre** | El nombre de la sustancia (requerido) |
+   | **identificador** | Números FL, CAS u otros códigos de identificación |
+   | **datos** | Resto de columnas relevantes: restricciones, pureza, notas, límites, etc. |
+   | **ignorar** | Columnas sin información relevante (ej. numeración de filas) |
 
 4. Haz clic en **"Procesar e indexar"**
 5. Espera a que finalice — verás el número de fragmentos indexados al terminar
@@ -177,7 +177,9 @@ El sistema detecta automáticamente tres tipos de estructura:
 
 - **Solo texto** — reglamentos con artículos y párrafos (sin tabla)
 - **Solo tabla** — anexos con listados de sustancias en formato tabla
-- **Mixto** — reglamentos que combinan texto narrativo y una tabla de sustancias
+- **Mixto** — documentos que combinan texto narrativo y tablas
+
+Para documentos **mixtos con múltiples tablas intercaladas** (ej. monografías donde cada sustancia tiene varias páginas con tablas de especificaciones y métodos de prueba), marca la opción **"Indexar todo como texto"** al cargar. Esto procesa todas las páginas como texto y omite la extracción de tabla estructurada, produciendo mejores resultados para búsqueda semántica.
 
 Puedes cargar múltiples documentos de distintos tipos. Cada uno se mantiene identificado por separado.
 
@@ -188,6 +190,7 @@ Puedes cargar múltiples documentos de distintos tipos. Cada uno se mantiene ide
 | Problema | Qué hacer |
 |----------|-----------|
 | La aplicación no abre | Verifica que Python está instalado y que ejecutaste `iniciar.bat` como administrador |
+| Error `chroma-hnswlib` al instalar | Instala [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) con la opción "Desarrollo de escritorio con C++", o usa Python 3.11/3.12 |
 | "API Key no configurada" | Revisa que el archivo `.env` existe y que la key está escrita correctamente (sin espacios antes ni después) |
 | "No hay documentos indexados" | Ve a la pestaña Administración y carga al menos un PDF primero |
 | La tabla no se detectó | Ajusta manualmente el número de página de inicio de la tabla en la UI |
@@ -204,6 +207,9 @@ El texto de los documentos se envía a OpenAI para generar los embeddings (repre
 
 **¿Puedo usar el sistema sin MySQL?**
 Sí. MySQL es opcional. Sin él, el sistema usa solo la base vectorial (ChromaDB) y funciona bien para la mayoría de consultas. Solo las consultas de conteo y listado exacto pueden ser menos precisas.
+
+**¿Necesito crear la base de datos MySQL manualmente?**
+No. Si MySQL está configurado en el `.env`, la base de datos `rag_regulatorio` y sus tablas se crean automáticamente la primera vez que se inicia la aplicación.
 
 **¿Qué pasa si cargo el mismo PDF dos veces?**
 El sistema lo reconoce por nombre de archivo y reemplaza el documento anterior.
